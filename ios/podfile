@@ -10,14 +10,12 @@ project 'Runner', {
   'Release' => :release,
 }
 
-def flutter_installation
-  flutter_root = File.expand_path(File.join(__dir__, '..', 'flutter'))
-  File.exist?(File.join(flutter_root, 'generated.xcconfig'))
+def flutter_install_all_ios_pods(flutter_application_path)
+  pod 'Flutter', :path => File.join(flutter_application_path, '.flutter-plugins')
+  eval(File.read(File.join(flutter_application_path, '.flutter-plugins-dependencies')), binding)
 end
 
-target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
 
-  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-end
+flutter_application_path = File.expand_path('..', __FILE__)
+flutter_install_all_ios_pods(flutter_application_path)
