@@ -25,7 +25,10 @@ workflows:
         script: |
           flutter build ios --debug --simulator
     artifacts:
-      - build/ios/iphonesimulator/*.app
+      - build/ios/Runner.app
+      - ios/Podfile
+      - ios/Podfile.lock
+      - ios/Runner.xcworkspace
     publishing:
       email:
         recipients:
