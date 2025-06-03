@@ -70,25 +70,37 @@ exports.generateGptReply = onCall({ cors: true, secrets: [openAiSecret] }, async
     timestamp: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
 
-  // 🧠 Emotion Analysis
-  const summary = `User expressed feelings of ${text.slice(0, 50)}...`;
-
+  // 🧠 Emotion Analysis (Improved Prompt)
   const emotionPrompt = [
     {
       role: "system",
-      content: "You are an emotion analysis assistant. Analyze the journal entry and return ONLY a valid JSON object with 3 scores from 0 to 10: anger, stress, sadness. No explanation, no text outside JSON.",
+      content: `
+You are an emotion analysis assistant.
+Your job is to analyze the user's journal entry and return a **strict valid JSON object**.
+
+Only return a JSON object with **exactly** these 3 fields (all numbers from 0 to 10):
+{
+  "anger": number,
+  "stress": number,
+  "sadness": number
+}
+
+⚠️ No explanation, no extra text, no code block, no markdown, just the pure JSON only.
+Example:
+{"anger": 2, "stress": 5, "sadness": 1}
+      `.trim(),
     },
     {
       role: "user",
       content: `Journal Entry: ${text}`,
-    }
+    },
   ];
 
   let anger = 0, stress = 0, sadness = 0;
 
   try {
     const emotionRes = await openai.chat.completions.create({
-      model: "gpt-4-1106-preview",
+      model: "gpt-3.5",
       messages: emotionPrompt,
       temperature: 0.3,
       max_tokens: 100,
@@ -96,7 +108,6 @@ exports.generateGptReply = onCall({ cors: true, secrets: [openAiSecret] }, async
 
     const raw = emotionRes.choices[0].message.content;
 
-    // استخراج JSON من الرد (حتى لو فيه نص خارجي)
     const match = raw.match(/\{[\s\S]*?\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
@@ -106,13 +117,12 @@ exports.generateGptReply = onCall({ cors: true, secrets: [openAiSecret] }, async
     } else {
       console.warn("⚠️ GPT response did not contain valid JSON:", raw);
     }
-
   } catch (err) {
     console.error("Emotion parsing failed ❌", err);
   }
 
   await summariesRef.doc(today).set({
-    coreTheme: summary,
+    coreTheme: `User expressed feelings of ${text.slice(0, 50)}...`,
     anger,
     stress,
     sadness,
@@ -125,6 +135,7 @@ exports.generateGptReply = onCall({ cors: true, secrets: [openAiSecret] }, async
 
   return { reply, usage, anger, stress, sadness };
 });
+
 
 
 // ✅ Function 2: GPT reply for shared therapy chat
@@ -140,17 +151,52 @@ exports.gptTherapyReply = onCall({ cors: true, secrets: [openAiSecret] }, async 
       throw new functions.https.HttpsError('invalid-argument', 'Missing pairingId');
     }
 
-    // Fetch pair data to get userA and userB
-    const pairDoc = await db.collection("pairs").doc(pairingId).get();
+    const pairRef = db.collection("pairs").doc(pairingId);
+    const pairDoc = await pairRef.get();
     const pairData = pairDoc.data();
+
     const userA = pairData?.userA;
     const userB = pairData?.userB;
+    const tokenLimit = pairData?.tokenLimit || 3000;
+    const tokenUsedThisWeek = pairData?.tokenUsedThisWeek || 0;
+    const lastSessionTimestamp = pairData?.lastSessionTimestamp?.toDate?.();
 
-    // Prepare GPT prompt
+    const now = new Date();
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1);
+    const shouldUpdateLastSession = !lastSessionTimestamp || lastSessionTimestamp < startOfWeek;
+
+    // ✅ احضار آخر 2–3 journal entries + summaries
+    const allUserIds = [userA, userB].filter(Boolean);
+    const journalSnippets = [];
+
+    for (const uid of allUserIds) {
+      const journalSnap = await db.collection("users").doc(uid).collection("journals")
+        .orderBy("timestamp", "desc").limit(3).get();
+
+      const summarySnap = await db.collection("users").doc(uid).collection("summaries")
+        .orderBy("timestamp", "desc").limit(3).get();
+
+      const summaries = summarySnap.docs.map(doc => {
+        const d = doc.data();
+        return `Summary: ${d.coreTheme}. Emotions - anger: ${d.anger}/10, stress: ${d.stress}/10, sadness: ${d.sadness}/10.`;
+      });
+
+      journalSnap.docs.forEach((doc, i) => {
+        const text = doc.data().message;
+        const sumText = summaries[i] || '';
+        journalSnippets.push(`Journal ${i + 1} by ${uid}: ${text}\n${sumText}`);
+      });
+    }
+
+    // ✅ إعداد prompt
     const prompt = [
       {
         role: "system",
-        content: `You are a relationship therapist facilitating a session between two partners. Use a balanced and validating tone to support healthy communication.`,
+        content: `You are a relationship therapist facilitating a session between two partners. Use a balanced, validating tone to support healthy communication.`,
+      },
+      {
+        role: "user",
+        content: `Here is recent journal history from both users:\n\n${journalSnippets.join('\n\n')}`,
       },
     ];
 
@@ -159,40 +205,46 @@ exports.gptTherapyReply = onCall({ cors: true, secrets: [openAiSecret] }, async 
     } else {
       prompt.push({
         role: "user",
-        content: `This is the first session between two partners. Start with a warm welcome and an open-ended question to help them begin.`,
+        content: `This is the first session. Start with a warm welcome and an open-ended question to begin the conversation.`,
       });
     }
 
-    // Generate GPT response
+    // ✅ استدعاء GPT
     const gptRes = await openai.chat.completions.create({
       model: "gpt-4-1106-preview",
       messages: prompt,
       temperature: 0.7,
-      max_tokens: 300,
+      max_tokens: 350,
     });
 
     const reply = gptRes.choices[0].message.content;
+    const tokenUsed = gptRes.usage.total_tokens;
 
-    // ✅ Increment sessionCount for both users
-    const updates = [];
-    if (userA) {
-      updates.push(db.collection("users").doc(userA).set({
-        sessionCount: admin.firestore.FieldValue.increment(1)
-      }, { merge: true }));
-    }
-    if (userB) {
-      updates.push(db.collection("users").doc(userB).set({
-        sessionCount: admin.firestore.FieldValue.increment(1)
-      }, { merge: true }));
-    }
-    await Promise.all(updates);
+    // ✅ تحديث البيانات
+    const updateData = {
+      tokenUsedThisWeek: admin.firestore.FieldValue.increment(tokenUsed),
+    };
 
-    return { reply };
+    if (shouldUpdateLastSession) {
+      updateData.lastSessionTimestamp = admin.firestore.FieldValue.serverTimestamp();
+    }
+
+    await pairRef.set(updateData, { merge: true });
+
+    // ✅ التحقق من تجاوز الحد
+    if (tokenUsedThisWeek + tokenUsed >= tokenLimit) {
+      await pairRef.set({ sessionLimitReached: true }, { merge: true });
+    }
+
+    return { reply, tokenUsed };
   } catch (error) {
     console.error("🔥 Error in gptTherapyReply:", error);
     throw new functions.https.HttpsError('internal', error.message || 'Unknown error');
   }
 });
+
+
+
 
 
 // ✅ Function 3: Archive old journals
@@ -224,7 +276,7 @@ exports.archiveOldJournals = onSchedule("every 24 hours", async () => {
 // ✅ Function 4: Weekly Advice
 exports.sendWeeklyReflection = onSchedule(
   {
-    schedule: "50 * * * *", // ← عدّلها حسب ما يناسبك لاحقًا
+    schedule: "* * * * *", // ← عدّلها حسب ما يناسبك لاحقًا
     secrets: [openAiSecret]
   },
   async () => {
