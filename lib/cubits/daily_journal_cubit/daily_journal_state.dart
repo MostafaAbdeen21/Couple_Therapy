@@ -10,11 +10,13 @@ class JournalLoaded extends JournalState {
   final List<JournalEntry> messages;
   final bool alreadySubmitted;
   final bool hasExtraJournal;
+  final bool isTyping;
 
   JournalLoaded({
     required this.messages,
     required this.alreadySubmitted,
-    required this.hasExtraJournal
+    required this.hasExtraJournal,
+    required this.isTyping
   });
 
 }

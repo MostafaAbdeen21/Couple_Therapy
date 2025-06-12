@@ -1,10 +1,10 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/therapy_room_model.dart';
 import 'therapy_room_state.dart';
-
 
 class TherapyRoomCubit extends Cubit<TherapyRoomState> {
   final String? pairingId;
@@ -14,8 +14,12 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
   String? partnerId;
   bool isPartnerOnline = false;
   bool sessionAvailable = true;
+  bool isTyping = false;
   int tokensUsed = 0;
-  int tokenLimit = 1000;
+  int tokenLimit = 2000;
+
+  StreamSubscription? _presenceSubscription;
+  StreamSubscription? _messagesSubscription;
 
   TherapyRoomCubit({required this.pairingId}) : super(TherapyRoomInitial()) {
     _init();
@@ -29,20 +33,33 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
       final userA = data['userA'];
       final userB = data['userB'];
       partnerId = userId == userA ? userB : userA;
-      tokenLimit = data['tokenLimit'] ?? 1000;
+      tokenLimit = data['tokenLimit'] ?? 2000;
       tokensUsed = data['tokenUsedThisWeek'] ?? 0;
+
       final lastSession = data['lastSessionTimestamp']?.toDate();
       final now = DateTime.now();
       final startOfWeek = DateTime(now.year, now.month, now.day - (now.weekday - 1));
       final sessionStartedThisWeek = lastSession != null && lastSession.isAfter(startOfWeek);
       sessionAvailable = sessionStartedThisWeek ? (tokensUsed < tokenLimit) : true;
 
-      FirebaseFirestore.instance.collection('pairs').doc(pairingId).collection('presence').doc(partnerId).snapshots().listen((snapshot) {
+      _presenceSubscription = FirebaseFirestore.instance
+          .collection('pairs')
+          .doc(pairingId)
+          .collection('presence')
+          .doc(partnerId)
+          .snapshots()
+          .listen((snapshot) {
         isPartnerOnline = snapshot.data()?['online'] == true;
         _emitCurrentState();
       });
 
-      FirebaseFirestore.instance.collection('pairs').doc(pairingId).collection('therapyRoom').orderBy('timestamp').snapshots().listen((snapshot) {
+      _messagesSubscription = FirebaseFirestore.instance
+          .collection('pairs')
+          .doc(pairingId)
+          .collection('therapyRoom')
+          .orderBy('timestamp')
+          .snapshots()
+          .listen((snapshot) {
         messages = snapshot.docs.map((doc) => TherapyMessage.fromMap(doc.data())).toList();
         _emitCurrentState();
       });
@@ -52,16 +69,21 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
   }
 
   void _emitCurrentState() {
+    if (isClosed) return;
     emit(TherapyRoomLoaded(
       messages: messages,
       isPartnerOnline: isPartnerOnline,
       sessionAvailable: sessionAvailable,
+      isTyping: isTyping,
     ));
   }
 
   Future<void> sendMessage(String messageText) async {
     if (!sessionAvailable || !isPartnerOnline || messageText.trim().isEmpty) return;
-    final chatRef = FirebaseFirestore.instance.collection('pairs').doc(pairingId).collection('therapyRoom');
+    final chatRef = FirebaseFirestore.instance
+        .collection('pairs')
+        .doc(pairingId)
+        .collection('therapyRoom');
 
     await chatRef.add({
       'userId': userId,
@@ -69,6 +91,9 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
       'type': 'user',
       'timestamp': FieldValue.serverTimestamp(),
     });
+
+    isTyping = true;
+    _emitCurrentState();
 
     final snapshot = await chatRef.orderBy('timestamp').get();
     final history = snapshot.docs.map((doc) {
@@ -81,14 +106,16 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
 
     if (tokensUsed >= tokenLimit) return;
 
-    final HttpsCallable callable = FirebaseFunctions.instance.httpsCallable('gptTherapyReply');
+    final HttpsCallable callable = FirebaseFunctions.instance.httpsCallable('gptTherapyReply-gptTherapyReply');
     final result = await callable.call(<String, dynamic>{
       'pairingId': pairingId,
       'history': history,
     });
 
-    final gptReply = result.data['reply'] as String;
-    final tokensConsumed = result.data['tokensUsed'] as int;
+    final gptReply = result.data['reply'] as String? ?? 'لا يوجد رد.';
+    final tokensConsumedRaw = result.data['tokenUsed'];
+    final tokensConsumed = tokensConsumedRaw is int ? tokensConsumedRaw : 0;
+
 
     await chatRef.add({
       'userId': 'gpt',
@@ -105,8 +132,12 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
     if (tokensUsed >= tokenLimit) {
       sessionAvailable = false;
     }
+
+
+    isTyping=false;
     _emitCurrentState();
   }
+
 
   Future<void> markPresence(bool online) async {
     await FirebaseFirestore.instance
@@ -115,5 +146,12 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
         .collection('presence')
         .doc(userId)
         .set({'online': online});
+  }
+
+  @override
+  Future<void> close() async {
+    await _presenceSubscription?.cancel();
+    await _messagesSubscription?.cancel();
+    return super.close();
   }
 }

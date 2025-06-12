@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:couple_therapy_app/cubits/supscription_cubit/supscription_state.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class SubscriptionCubit extends Cubit<SubscriptionState> {
   SubscriptionCubit() : super(SubscriptionInitial());
@@ -23,7 +23,7 @@ class SubscriptionCubit extends Cubit<SubscriptionState> {
         return;
       }
 
-      final callable = FirebaseFunctions.instance.httpsCallable('createCheckoutSession');
+      final callable = FirebaseFunctions.instance.httpsCallable('createCheckoutSession-createCheckoutSession');
       final result = await callable.call({'plan': plan, 'pairingId': pairingId});
       final url = result.data['url'];
 

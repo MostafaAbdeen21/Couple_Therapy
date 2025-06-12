@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
 import '../../models/home_model.dart';
 import 'home_state.dart';
 
@@ -9,7 +8,6 @@ class HomeCubit extends Cubit<HomeState> {
   HomeCubit() : super(HomeInitial());
 
   final user = FirebaseAuth.instance.currentUser;
-
   String? pairingId;
 
   Future<void> checkProfileStatus() async {

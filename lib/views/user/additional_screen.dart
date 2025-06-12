@@ -1,8 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AddOnsScreen extends StatelessWidget {
   const AddOnsScreen({super.key});
@@ -50,7 +51,7 @@ class AddOnsScreen extends StatelessWidget {
     final pairingId = doc.data()?['pairingId'];
 
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable('buyAddOn');
+      final callable = FirebaseFunctions.instance.httpsCallable('buyAddOn-buyAddOn');
       final result = await callable.call({
         'type': type,
         'quantity': quantity,

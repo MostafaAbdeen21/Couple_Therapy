@@ -65,6 +65,14 @@ class TherapyRoomScreen extends StatelessWidget {
                     },
                   ),
                 ),
+                if (state.isTyping)
+                  const Padding(
+                    padding: EdgeInsets.all(8.0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text("GPT is typing...", style: TextStyle(fontStyle: FontStyle.italic)),
+                    ),
+                  ),
                 const Divider(height: 1),
                 if (isAvailable)
                   Padding(

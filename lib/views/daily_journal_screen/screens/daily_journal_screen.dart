@@ -80,10 +80,15 @@ class _DailyJournalScreenState extends State<DailyJournalScreen> {
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollController,
-                    itemCount: state.messages.length,
+                    itemCount: state.messages.length + (state.isTyping ? 1 : 0),
                     itemBuilder: (context, index) {
-                      final msg = state.messages[index];
-                      return buildMessageBubble(msg.text, msg.role);
+                      if (index < state.messages.length) {
+                        final msg = state.messages[index];
+                        return buildMessageBubble(msg.text, msg.role);
+                      } else {
+                        // حالة الـ typing
+                        return buildMessageBubble("typing...", "gpt");
+                      }
                     },
                   ),
                 ),
