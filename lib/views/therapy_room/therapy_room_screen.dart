@@ -8,14 +8,29 @@ import '../../cubits/therapy_room_cubit/therapy_room_state.dart';
 class TherapyRoomScreen extends StatelessWidget {
   final String? pairingId;
   final TextEditingController _controller = TextEditingController();
-
+  final ScrollController _scrollController = ScrollController();
   TherapyRoomScreen({super.key, required this.pairingId});
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => TherapyRoomCubit(pairingId: pairingId)..markPresence(true),
-      child: BlocBuilder<TherapyRoomCubit, TherapyRoomState>(
+      child: BlocConsumer<TherapyRoomCubit, TherapyRoomState>(
+        listener: (context, state) {
+          if (state is TherapyRoomLoaded) _scrollToBottom();
+        },
         builder: (context, state) {
           if (state is TherapyRoomLoading || state is TherapyRoomInitial) {
             return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -40,6 +55,7 @@ class TherapyRoomScreen extends StatelessWidget {
                   ),
                 Expanded(
                   child: ListView.builder(
+                    controller: _scrollController,
                     padding: const EdgeInsets.all(16),
                     itemCount: state.messages.length,
                     itemBuilder: (context, index) {

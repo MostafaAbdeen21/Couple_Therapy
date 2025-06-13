@@ -1,9 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'package:firebase_auth/firebase_auth.dart';
+import '../../cubits/buy_addon_cubit/buy_addon_cubit.dart';
+import '../../cubits/buy_addon_cubit/buy_addon_state.dart';
 
 class AddOnsScreen extends StatelessWidget {
   const AddOnsScreen({super.key});
@@ -34,7 +34,10 @@ class AddOnsScreen extends StatelessWidget {
                 title: Text('${entry.key} ${type == 'journal' ? 'Journal(s)' : 'Session(s)'}'),
                 subtitle: Text(entry.value),
                 trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () => _buyAddon(context, type, entry.key),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.read<BuyAddonCubit>().buyAddon(type: type, quantity: entry.key);
+                },
               );
             }).toList(),
           ),
@@ -43,54 +46,52 @@ class AddOnsScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _buyAddon(BuildContext context, String type, int quantity) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    final pairingId = doc.data()?['pairingId'];
-
-    try {
-      final callable = FirebaseFunctions.instance.httpsCallable('buyAddOn-buyAddOn');
-      final result = await callable.call({
-        'type': type,
-        'quantity': quantity,
-        'pairingId': pairingId,
-      });
-
-      final url = result.data['url'];
-      if (url != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Redirecting to Stripe...')),
-        );
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      }
-    } catch (e) {
-      print('❌ Error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+  void _handleState(BuildContext context, BuyAddonState state) async {
+    if (state is BuyAddonSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Redirecting to Stripe...')),
+      );
+      await launchUrl(Uri.parse(state.url), mode: LaunchMode.externalApplication);
+    } else if (state is BuyAddonError) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${state.message}')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Buy Add-Ons")),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            ElevatedButton.icon(
-              icon: const Icon(Icons.note_add),
-              label: const Text("Buy Additional Journals"),
-              onPressed: () => _showAddonDialog(context, 'journal'),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.video_call),
-              label: const Text("Buy Additional Sessions"),
-              onPressed: () => _showAddonDialog(context, 'session'),
-            ),
-          ],
+    return BlocProvider(
+      create: (_) => BuyAddonCubit(),
+      child: Scaffold(
+        appBar: AppBar(title: const Text("Buy Add-Ons")),
+        body: Padding(
+          padding: const EdgeInsets.all(24),
+          child: BlocConsumer<BuyAddonCubit, BuyAddonState>(
+            listener: _handleState,
+            builder: (context, state) {
+              return Column(
+                children: [
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.note_add),
+                    label: const Text("Buy Additional Journals"),
+                    onPressed: () => _showAddonDialog(context, 'journal'),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.video_call),
+                    label: const Text("Buy Additional Sessions"),
+                    onPressed: () => _showAddonDialog(context, 'session'),
+                  ),
+                  const SizedBox(height: 40),
+                  if (state is BuyAddonLoading)
+                    const CircularProgressIndicator()
+                  else
+                    const SizedBox.shrink(),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

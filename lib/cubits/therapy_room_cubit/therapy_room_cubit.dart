@@ -113,8 +113,8 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
     });
 
     final gptReply = result.data['reply'] as String? ?? 'لا يوجد رد.';
-    final tokensConsumedRaw = result.data['tokenUsed'];
-    final tokensConsumed = tokensConsumedRaw is int ? tokensConsumedRaw : 0;
+    // final tokensConsumedRaw = result.data['tokenUsed'];
+    // final tokensConsumed = tokensConsumedRaw is int ? tokensConsumedRaw : 0;
 
 
     await chatRef.add({
@@ -124,10 +124,10 @@ class TherapyRoomCubit extends Cubit<TherapyRoomState> {
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    tokensUsed += tokensConsumed;
-    await FirebaseFirestore.instance.collection('pairs').doc(pairingId).update({
-      'tokenUsedThisWeek': tokensUsed,
-    });
+    // tokensUsed += tokensConsumed;
+    // await FirebaseFirestore.instance.collection('pairs').doc(pairingId).update({
+    //   'tokenUsedThisWeek': tokensUsed,
+    // });
 
     if (tokensUsed >= tokenLimit) {
       sessionAvailable = false;
